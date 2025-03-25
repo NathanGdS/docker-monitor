@@ -8,29 +8,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/NathanGdS/docker-monitor/models"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
-
-type StatsData struct {
-	CPUStats struct {
-		CPUUsage struct {
-			TotalUsage  uint64   `json:"total_usage"`
-			PercpuUsage []uint64 `json:"percpu_usage"`
-		} `json:"cpu_usage"`
-		SystemUsage uint64 `json:"system_usage"`
-	} `json:"cpu_stats"`
-	PreCPUStats struct {
-		CPUUsage struct {
-			TotalUsage uint64 `json:"total_usage"`
-		} `json:"cpu_usage"`
-		SystemUsage uint64 `json:"system_usage"`
-	} `json:"precpu_stats"`
-	MemoryStats struct {
-		Usage uint64 `json:"usage"`
-		Limit uint64 `json:"limit"`
-	} `json:"memory_stats"`
-}
 
 func main() {
 	apiClient, err := client.NewClientWithOpts(client.WithVersion("1.41"), client.FromEnv)
@@ -60,7 +41,7 @@ func main() {
 		}
 		stats.Body.Close()
 
-		var s StatsData
+		var s models.StatsData
 
 		if err := json.Unmarshal(data, &s); err != nil {
 			log.Printf("Error unmarshaling stats JSON: %v", err)
@@ -81,7 +62,7 @@ func main() {
 	}
 }
 
-func calculateCPUPercent(stats *StatsData) float64 {
+func calculateCPUPercent(stats *models.StatsData) float64 {
 	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
 	systemDelta := float64(stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage)
 	if systemDelta > 0.0 {

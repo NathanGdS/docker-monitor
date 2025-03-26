@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/NathanGdS/docker-monitor/models"
@@ -18,18 +19,27 @@ func main() {
 	client := connectToDockerClient()
 	containers := getContainers(client)
 
+	var wg sync.WaitGroup
+
 	for _, ctr := range containers {
-		statsData, err := getContainerStatusData(client, ctr)
+		wg.Add(1)
 
-		if err != nil {
-			log.Printf("Error getting container status data: %v", err)
-			continue
-		}
-
-		printResult(statsData, ctr)
-
-		time.Sleep(2 * time.Second)
+		go showContainerStats(client, ctr, &wg)
 	}
+
+	wg.Wait()
+}
+
+func showContainerStats(client *client.Client, container container.Summary, wg *sync.WaitGroup) {
+	defer wg.Done()
+	statsData, err := getContainerStatusData(client, container)
+
+	if err != nil {
+		log.Printf("Error getting container status data: %v", err)
+		return
+	}
+
+	printResult(statsData, container)
 }
 
 func connectToDockerClient() *client.Client {

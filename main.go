@@ -80,7 +80,7 @@ func getContainerStatusData(client *client.Client, container container.Summary) 
 	if err != nil {
 		stats.Body.Close()
 		time.Sleep(2 * time.Second)
-		return models.StatsData{}, errors.New("Error reading stats data body")
+		return models.StatsData{}, errors.New("error reading stats data body")
 	}
 	stats.Body.Close()
 
@@ -89,7 +89,7 @@ func getContainerStatusData(client *client.Client, container container.Summary) 
 	if err := json.Unmarshal(data, &s); err != nil {
 		log.Printf("Error unmarshaling stats JSON: %v", err)
 		time.Sleep(2 * time.Second)
-		return models.StatsData{}, errors.New("Error unmarshaling stats JSON")
+		return models.StatsData{}, errors.New("error unmarshaling stats JSON")
 	}
 	return s, nil
 }

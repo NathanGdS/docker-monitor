@@ -60,7 +60,9 @@ func connectToDockerClient() *client.Client {
 }
 
 func getContainers(apiClient *client.Client) []container.Summary {
-	containers, err := apiClient.ContainerList(context.Background(), container.ListOptions{})
+	containers, err := apiClient.ContainerList(context.Background(), container.ListOptions{
+		All: true,
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -109,6 +111,16 @@ func printResult(s models.StatsData, container container.Summary) {
 	memUsage := fmt.Sprintf("%.2fMB", float64(s.MemoryStats.Usage)/1024/1024)
 	memLimit := fmt.Sprintf("%.2fMB", float64(s.MemoryStats.Limit)/1024/1024)
 
-	fmt.Printf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s\n",
-		container.ID[:12], container.Image, cpuPercent, memUsage, memLimit)
+	var containerStatus string
+
+	if container.State == "running" {
+		containerStatus = utils.StrGreen("Running")
+	} else if container.State == "paused" {
+		containerStatus = utils.StrYellow("Paused")
+	} else {
+		containerStatus = utils.StrRed("Stopped")
+	}
+
+	fmt.Printf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
+		container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
 }

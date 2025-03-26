@@ -11,13 +11,20 @@ import (
 	"time"
 
 	"github.com/NathanGdS/docker-monitor/models"
+	"github.com/NathanGdS/docker-monitor/utils"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
 
 func main() {
+	utils.ClearConsole()
+	fmt.Println("Docker Monitor")
+	fmt.Println("--------------")
+
 	client := connectToDockerClient()
 	containers := getContainers(client)
+
+	fmt.Println("Monitoring containers...")
 
 	var wg sync.WaitGroup
 

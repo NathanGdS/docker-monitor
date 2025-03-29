@@ -14,35 +14,67 @@ import (
 	"github.com/NathanGdS/docker-monitor/utils"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/gosuri/uilive"
 )
 
 func main() {
+	utils.ClearConsole()
+	writer := uilive.New()
+	writer.Start()
 
 	for {
-		utils.ClearConsole()
-		fmt.Println("Docker Monitor")
-		fmt.Println("--------------")
+		var greetingMessage string
+		var runningContainers string
+		var pausedContainers string
+		var stoppedContainers string
+		var finishedMessages string
+
+		greetingMessage += "----------- Docker Monitor -----------\n"
+		greetingMessage += "\tMonitoring containers...\n"
+		greetingMessage += "--------------------------------------\n"
 
 		client := connectToDockerClient()
 		containers := getContainers(client)
-
-		fmt.Println("Monitoring containers...")
 
 		var wg sync.WaitGroup
 
 		for _, ctr := range containers {
 			wg.Add(1)
 
-			go showContainerStats(client, ctr, &wg)
+			go showContainerStats(client, ctr, &wg, &runningContainers, &pausedContainers, &stoppedContainers)
 		}
 		wg.Wait()
 
-		time.Sleep(10 * time.Second)
-	}
+		if len(runningContainers) > 0 {
+			finishedMessages += utils.StrGreen("Running Containers:\n")
+			finishedMessages += runningContainers
+		} else {
+			finishedMessages += utils.StrRed("No Running Containers\n")
+		}
 
+		if len(pausedContainers) > 0 {
+			finishedMessages += utils.StrYellow("Paused Containers:\n")
+			finishedMessages += pausedContainers
+		} else {
+			finishedMessages += utils.StrYellow("No Paused Containers\n")
+		}
+
+		if len(stoppedContainers) > 0 {
+			finishedMessages += utils.StrRed("Stopped Containers:\n")
+			finishedMessages += stoppedContainers
+		} else {
+			finishedMessages += utils.StrRed("No Stopped Containers\n")
+		}
+
+		finishedMessages += "--------------------------------------\n"
+
+		fmt.Fprintf(writer, "%s%s", greetingMessage, finishedMessages)
+		writer.Flush()
+		writer.RefreshInterval = 2 * time.Second
+	}
 }
 
-func showContainerStats(client *client.Client, container container.Summary, wg *sync.WaitGroup) {
+func showContainerStats(client *client.Client, container container.Summary, wg *sync.WaitGroup, running *string, paused *string, stopped *string) {
 	defer wg.Done()
 	statsData, err := getContainerStatusData(client, container)
 
@@ -51,7 +83,7 @@ func showContainerStats(client *client.Client, container container.Summary, wg *
 		return
 	}
 
-	printResult(statsData, container)
+	printResult(statsData, container, running, paused, stopped)
 }
 
 func connectToDockerClient() *client.Client {
@@ -110,7 +142,7 @@ func calculateCPUPercent(stats *models.StatsData) float64 {
 	return 0.0
 }
 
-func printResult(s models.StatsData, container container.Summary) {
+func printResult(s models.StatsData, container container.Summary, running *string, paused *string, stopped *string) {
 	cpuPercent := calculateCPUPercent(&s)
 
 	memUsage := fmt.Sprintf("%.2fMB", float64(s.MemoryStats.Usage)/1024/1024)
@@ -120,12 +152,18 @@ func printResult(s models.StatsData, container container.Summary) {
 
 	if container.State == "running" {
 		containerStatus = utils.StrGreen("Running")
+		*running += fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
+			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
+
 	} else if container.State == "paused" {
 		containerStatus = utils.StrYellow("Paused")
+
+		*paused += fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
+			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
 	} else {
 		containerStatus = utils.StrRed("Stopped")
-	}
 
-	fmt.Printf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
-		container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
+		*stopped += fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
+			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
+	}
 }

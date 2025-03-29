@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -24,9 +25,9 @@ func main() {
 
 	for {
 		var greetingMessage string
-		var runningContainers string
-		var pausedContainers string
-		var stoppedContainers string
+		var runningContainers []string
+		var pausedContainers []string
+		var stoppedContainers []string
 		var finishedMessages string
 
 		greetingMessage += "----------- Docker Monitor -----------\n"
@@ -38,6 +39,7 @@ func main() {
 
 		var wg sync.WaitGroup
 
+		// Maybe should be a channel?
 		for _, ctr := range containers {
 			wg.Add(1)
 
@@ -45,36 +47,50 @@ func main() {
 		}
 		wg.Wait()
 
+		//TODO: Refactor this into a most elegant way
 		if len(runningContainers) > 0 {
 			finishedMessages += utils.StrGreen("Running Containers:\n")
-			finishedMessages += runningContainers
+			sort.Strings(runningContainers)
+
+			for _, container := range runningContainers {
+				finishedMessages += container
+			}
 		} else {
 			finishedMessages += utils.StrRed("No Running Containers\n")
 		}
 
 		if len(pausedContainers) > 0 {
 			finishedMessages += utils.StrYellow("Paused Containers:\n")
-			finishedMessages += pausedContainers
+			sort.Strings(pausedContainers)
+			for _, container := range pausedContainers {
+				finishedMessages += container
+			}
 		} else {
 			finishedMessages += utils.StrYellow("No Paused Containers\n")
 		}
 
 		if len(stoppedContainers) > 0 {
 			finishedMessages += utils.StrRed("Stopped Containers:\n")
-			finishedMessages += stoppedContainers
+			sort.Strings(stoppedContainers)
+			for _, container := range stoppedContainers {
+				finishedMessages += container
+			}
 		} else {
 			finishedMessages += utils.StrRed("No Stopped Containers\n")
 		}
 
 		finishedMessages += "--------------------------------------\n"
+		finishedMessages += "Last updated: " + time.Now().Format("15:04:05") + "\n"
+		finishedMessages += "--------------------------------------\n"
 
 		fmt.Fprintf(writer, "%s%s", greetingMessage, finishedMessages)
+		time.Sleep(5 * time.Second)
 		writer.Flush()
-		writer.RefreshInterval = 2 * time.Second
+		greetingMessage = ""
 	}
 }
 
-func showContainerStats(client *client.Client, container container.Summary, wg *sync.WaitGroup, running *string, paused *string, stopped *string) {
+func showContainerStats(client *client.Client, container container.Summary, wg *sync.WaitGroup, running *[]string, paused *[]string, stopped *[]string) {
 	defer wg.Done()
 	statsData, err := getContainerStatusData(client, container)
 
@@ -142,7 +158,7 @@ func calculateCPUPercent(stats *models.StatsData) float64 {
 	return 0.0
 }
 
-func printResult(s models.StatsData, container container.Summary, running *string, paused *string, stopped *string) {
+func printResult(s models.StatsData, container container.Summary, running *[]string, paused *[]string, stopped *[]string) {
 	cpuPercent := calculateCPUPercent(&s)
 
 	memUsage := fmt.Sprintf("%.2fMB", float64(s.MemoryStats.Usage)/1024/1024)
@@ -150,20 +166,27 @@ func printResult(s models.StatsData, container container.Summary, running *strin
 
 	var containerStatus string
 
+	// TODO: Refactor this into a more elegant way
 	if container.State == "running" {
 		containerStatus = utils.StrGreen("Running")
-		*running += fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
+		runningContainer := fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
 			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
+
+		*running = append(*running, runningContainer)
 
 	} else if container.State == "paused" {
 		containerStatus = utils.StrYellow("Paused")
 
-		*paused += fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
+		pausedContainer := fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
 			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
+
+		*paused = append(*paused, pausedContainer)
 	} else {
 		containerStatus = utils.StrRed("Stopped")
 
-		*stopped += fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
+		stoppedContainer := fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
 			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
+
+		*stopped = append(*stopped, stoppedContainer)
 	}
 }

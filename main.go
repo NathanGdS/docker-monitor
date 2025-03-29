@@ -17,24 +17,29 @@ import (
 )
 
 func main() {
-	utils.ClearConsole()
-	fmt.Println("Docker Monitor")
-	fmt.Println("--------------")
 
-	client := connectToDockerClient()
-	containers := getContainers(client)
+	for {
+		utils.ClearConsole()
+		fmt.Println("Docker Monitor")
+		fmt.Println("--------------")
 
-	fmt.Println("Monitoring containers...")
+		client := connectToDockerClient()
+		containers := getContainers(client)
 
-	var wg sync.WaitGroup
+		fmt.Println("Monitoring containers...")
 
-	for _, ctr := range containers {
-		wg.Add(1)
+		var wg sync.WaitGroup
 
-		go showContainerStats(client, ctr, &wg)
+		for _, ctr := range containers {
+			wg.Add(1)
+
+			go showContainerStats(client, ctr, &wg)
+		}
+		wg.Wait()
+
+		time.Sleep(10 * time.Second)
 	}
 
-	wg.Wait()
 }
 
 func showContainerStats(client *client.Client, container container.Summary, wg *sync.WaitGroup) {

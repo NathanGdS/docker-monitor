@@ -13,104 +13,127 @@ import (
 
 	"github.com/NathanGdS/docker-monitor/models"
 	"github.com/NathanGdS/docker-monitor/utils"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/gosuri/uilive"
 )
 
-func main() {
-	utils.ClearConsole()
-	writer := uilive.New()
-	writer.Start()
+type containerUpdateMsg struct {
+	Running []string
+	Paused  []string
+	Stopped []string
+}
 
-	for {
-		var greetingMessage string
-		var runningContainers []string
-		var pausedContainers []string
-		var stoppedContainers []string
-		var finishedMessages string
+type model struct {
+	client   *client.Client
+	spinner  spinner.Model
+	running  []string
+	paused   []string
+	stopped  []string
+	quitting bool
+}
 
-		greetingMessage += "----------- Docker Monitor -----------\n"
-		greetingMessage += "\tMonitoring containers...\n"
-		greetingMessage += "--------------------------------------\n"
+func (m model) Init() tea.Cmd {
+	return tea.Batch(m.spinner.Tick, fetchContainerData(m.client))
+}
 
-		client := connectToDockerClient()
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c", "ctrl+d":
+			m.quitting = true
+			return m, tea.Quit
+		}
+
+	case containerUpdateMsg:
+		m.running = msg.Running
+		m.paused = msg.Paused
+		m.stopped = msg.Stopped
+		return m, fetchContainerData(m.client)
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m model) View() string {
+	s := "\n" + m.spinner.View() + utils.Reset + " Monitoring Containers " + m.spinner.View() + "\n\n" + utils.Reset
+	s += formatContainerSection("Running Containers:", m.running, utils.StrGreen)
+	s += formatContainerSection("Paused Containers:", m.paused, utils.StrYellow)
+	s += formatContainerSection("Stopped Containers:", m.stopped, utils.StrRed)
+	s += "--------------------------------------\n"
+	s += utils.Reset + "Last updated: " + time.Now().Format("15:04:05") + "\n\n"
+	s += "Press q to exit.\n" + utils.Reset
+
+	return s
+}
+
+func fetchContainerData(client *client.Client) tea.Cmd {
+	return func() tea.Msg {
 		containers := getContainers(client)
-
+		var running, paused, stopped []string
 		var wg sync.WaitGroup
 
-		// Maybe should be a channel?
 		for _, ctr := range containers {
 			wg.Add(1)
-
-			go showContainerStats(client, ctr, &wg, &runningContainers, &pausedContainers, &stoppedContainers)
+			go func(c container.Summary) {
+				defer wg.Done()
+				stats, err := getContainerStatusData(client, c)
+				if err == nil {
+					categorizeContainer(stats, c, &running, &paused, &stopped)
+				}
+			}(ctr)
 		}
+
 		wg.Wait()
-
-		//TODO: Refactor this into a most elegant way
-		if len(runningContainers) > 0 {
-			finishedMessages += utils.StrGreen("Running Containers:\n")
-			sort.Strings(runningContainers)
-
-			for _, container := range runningContainers {
-				finishedMessages += container
-			}
-		} else {
-			finishedMessages += utils.StrRed("No Running Containers\n")
-		}
-
-		if len(pausedContainers) > 0 {
-			finishedMessages += utils.StrYellow("Paused Containers:\n")
-			sort.Strings(pausedContainers)
-			for _, container := range pausedContainers {
-				finishedMessages += container
-			}
-		} else {
-			finishedMessages += utils.StrYellow("No Paused Containers\n")
-		}
-
-		if len(stoppedContainers) > 0 {
-			finishedMessages += utils.StrRed("Stopped Containers:\n")
-			sort.Strings(stoppedContainers)
-			for _, container := range stoppedContainers {
-				finishedMessages += container
-			}
-		} else {
-			finishedMessages += utils.StrRed("No Stopped Containers\n")
-		}
-
-		finishedMessages += "--------------------------------------\n"
-		finishedMessages += "Last updated: " + time.Now().Format("15:04:05") + "\n"
-		finishedMessages += "--------------------------------------\n"
-
-		fmt.Fprintf(writer, "%s%s", greetingMessage, finishedMessages)
-		time.Sleep(5 * time.Second)
-		writer.Flush()
-		greetingMessage = ""
+		sort.Strings(running)
+		sort.Strings(paused)
+		sort.Strings(stopped)
+		return containerUpdateMsg{running, paused, stopped}
 	}
 }
 
-func showContainerStats(client *client.Client, container container.Summary, wg *sync.WaitGroup, running *[]string, paused *[]string, stopped *[]string) {
-	defer wg.Done()
-	statsData, err := getContainerStatusData(client, container)
+func categorizeContainer(s models.StatsData, c container.Summary, running, paused, stopped *[]string) {
+	cpuPercent := calculateCPUPercent(&s)
+	memUsage := fmt.Sprintf("%.2fMB", float64(s.MemoryStats.Usage)/1024/1024)
+	memLimit := fmt.Sprintf("%.2fMB", float64(s.MemoryStats.Limit)/1024/1024)
+	status := fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s\n", c.ID[:12], c.Image, cpuPercent, memUsage, memLimit)
 
-	if err != nil {
-		log.Printf("Error getting container status data: %v", err)
-		return
+	switch c.State {
+	case "running":
+		*running = append(*running, utils.StrGreen(status))
+	case "paused":
+		*paused = append(*paused, utils.StrYellow(status))
+	default:
+		*stopped = append(*stopped, utils.StrRed(status))
 	}
-
-	statsData.ContainerId = container.ID
-	printResult(statsData, container, running, paused, stopped)
 }
 
-func connectToDockerClient() *client.Client {
-	apiClient, err := client.NewClientWithOpts(client.WithVersion("1.41"), client.FromEnv)
-	if err != nil {
-		panic(err)
+func formatContainerSection(title string, containers []string, colorFunc func(string) string) string {
+	if len(containers) == 0 {
+		return colorFunc("No " + title + "\n")
 	}
-	defer apiClient.Close()
+	s := colorFunc(title + "\n")
+	for _, c := range containers {
+		s += c + utils.Reset
+	}
+	return s
+}
 
-	return apiClient
+func calculateCPUPercent(stats *models.StatsData) float64 {
+	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage)
+	if systemDelta > 0.0 {
+		return (cpuDelta / systemDelta) * float64(len(stats.CPUStats.CPUUsage.PercpuUsage)) * 100.0
+	}
+	return 0.0
 }
 
 func getContainers(apiClient *client.Client) []container.Summary {
@@ -150,44 +173,19 @@ func getContainerStatusData(client *client.Client, container container.Summary) 
 	return s, nil
 }
 
-func calculateCPUPercent(stats *models.StatsData) float64 {
-	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
-	systemDelta := float64(stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage)
-	if systemDelta > 0.0 {
-		return (cpuDelta / systemDelta) * float64(len(stats.CPUStats.CPUUsage.PercpuUsage)) * 100.0
+func main() {
+	utils.ClearConsole()
+	client, err := client.NewClientWithOpts(client.WithVersion("1.41"), client.FromEnv)
+	if err != nil {
+		log.Fatalf("Error creating Docker client: %v", err)
 	}
-	return 0.0
-}
+	defer client.Close()
 
-func printResult(s models.StatsData, container container.Summary, running *[]string, paused *[]string, stopped *[]string) {
-	cpuPercent := calculateCPUPercent(&s)
+	var spinner = spinner.New()
+	spinner.Style = spinner.Style.Foreground(lipgloss.NoColor{})
 
-	memUsage := fmt.Sprintf("%.2fMB", float64(s.MemoryStats.Usage)/1024/1024)
-	memLimit := fmt.Sprintf("%.2fMB", float64(s.MemoryStats.Limit)/1024/1024)
-
-	var containerStatus string
-
-	// TODO: Refactor this into a more elegant way
-	if container.State == "running" {
-		containerStatus = utils.StrGreen("Running")
-		runningContainer := fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
-			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
-
-		*running = append(*running, runningContainer)
-
-	} else if container.State == "paused" {
-		containerStatus = utils.StrYellow("Paused")
-
-		pausedContainer := fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
-			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
-
-		*paused = append(*paused, pausedContainer)
-	} else {
-		containerStatus = utils.StrRed("Stopped")
-
-		stoppedContainer := fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
-			s.ContainerId[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
-
-		*stopped = append(*stopped, stoppedContainer)
+	p := tea.NewProgram(model{client: client, spinner: spinner})
+	if _, err := p.Run(); err != nil {
+		log.Fatalf("Error running program: %v", err)
 	}
 }

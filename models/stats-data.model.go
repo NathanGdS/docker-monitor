@@ -1,6 +1,7 @@
 package models
 
 type StatsData struct {
+	ContainerId string      `json:"container_id"`
 	CPUStats    CPUStats    `json:"cpu_stats"`
 	PreCPUStats PreCPUStats `json:"precpu_stats"`
 	MemoryStats MemoryStats `json:"memory_stats"`

@@ -99,6 +99,7 @@ func showContainerStats(client *client.Client, container container.Summary, wg *
 		return
 	}
 
+	statsData.ContainerId = container.ID
 	printResult(statsData, container, running, paused, stopped)
 }
 
@@ -185,7 +186,7 @@ func printResult(s models.StatsData, container container.Summary, running *[]str
 		containerStatus = utils.StrRed("Stopped")
 
 		stoppedContainer := fmt.Sprintf("Container: %s (%s) | CPU: %.2f%% | Memory: %s / %s - %s \n",
-			container.ID[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
+			s.ContainerId[:12], container.Image, cpuPercent, memUsage, memLimit, containerStatus)
 
 		*stopped = append(*stopped, stoppedContainer)
 	}
